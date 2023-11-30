@@ -1,4 +1,4 @@
-import tempfile, os, time, cv2, threading
+import tempfile, os, time, cv2, threading, pygame
 from typing import Any, Callable
 from dataclasses import dataclass
 
@@ -8,6 +8,7 @@ from header.h_point import h_Point
 
 class Util:
     _editor: h_Editor = None
+    _editor_center: tuple[int, int] = None
 
     @staticmethod
     def get_editor() -> h_Editor:
@@ -135,6 +136,33 @@ class Util:
                 max_y = p.y
 
         return Rect(min_x, min_y, max_x - min_x, max_y - min_y)
+
+    @staticmethod
+    def zoom_at_pos(screen: pygame.Surface, pos: tuple[float | int, float | int], scale: float | int) -> None:
+        # Get the current mouse position
+        x, y = pos
+
+        # Create a new surface that is a copy of the original surface but scaled by the zoom factor
+        zoomed_surface = pygame.transform.scale(screen, (int(screen.get_width() * scale), int(screen.get_height() * scale)))
+
+        # Calculate the new position of the mouse on the zoomed surface
+        zoomed_mouse_pos = x * scale, y * scale
+
+        # Create a new surface that is the size of the screen
+        new_surface = pygame.Surface((screen.get_width(), screen.get_height()))
+        new_surface.fill((255, 255, 255))
+
+        # Blit the zoomed surface onto this new surface at a position such that the new mouse position is at the center of the screen
+        new_surface.blit(zoomed_surface, (screen.get_width() / 2 - zoomed_mouse_pos[0], screen.get_height() / 2 - zoomed_mouse_pos[1]))
+
+        Util._editor_center = (screen.get_width() / 2 - zoomed_mouse_pos[0], screen.get_height() / 2 - zoomed_mouse_pos[1])
+
+        # Replace the original surface with the new surface
+        screen.blit(new_surface, (0, 0))
+    
+    @staticmethod
+    def get_zoomed_mouse_pos(pos: tuple[float | int, float | int], zoom: float | int) -> tuple[float | int, float | int]:
+        return (pos[0] - Util._editor_center[0]) / zoom, (pos[1] - Util._editor_center[1]) / zoom
     
     @staticmethod
     def convertorigin(point: 'Point', _from: int, _to: int) -> 'Point':

@@ -1,5 +1,4 @@
-import ctypes, ctypes.wintypes
-import pygame, os, cv2
+import pygame, os, cv2, ctypes, ctypes.wintypes, debugpy
 from tkinter import filedialog
 from collections import deque
 
@@ -20,6 +19,9 @@ TODO
     - When you click a point it should show it's properties in the toolbar
       from there you should be able to click 'set next point' and then click
       the point you want to set it to
+ - make the menubar actually do things
+ - saving and loading a project (contains image, points, origin, point density)
+ - more controls in the toolbar
 """
 
 
@@ -64,6 +66,11 @@ class Editor(h_Editor):
         self._bounds: Rect = Rect(0, 0, 0, 0)
         self._pressed_keys = {}
         self._zoom_level = 1
+        self._zoom_focus = (self._editor_frame.get_width() / 2, self._editor_frame.get_height() / 2)
+        self._dragging = False
+        self._last_mouse_pos = (0, 0)
+        self._clock = pygame.time.Clock()
+        self._evaluated_mouse_pos: tuple[float, float] = None
 
         self._setup_toolbar()
         self._setup_menubar()
@@ -86,6 +93,7 @@ class Editor(h_Editor):
         ,1)
     
     def _draw(self) -> None:
+        self._screen.fill((255, 255, 255))
         self._editor_frame.fill((255, 255, 255))
 
         # Draw Editor Frame ============================
@@ -108,13 +116,7 @@ class Editor(h_Editor):
         for c in self._tool_components:
             c.draw(self._tool_frame)
 
-        # Draw HUD =====================================
-        text = self._hud_font.render(f"Mouse: {self._calculate_machine_pos(Point(pygame.mouse.get_pos()[0], pygame.mouse.get_pos()[1]))}", True, (0, 0, 0))
-        self._editor_frame.blit(text, (10, 0))
 
-        if self._hover_point:
-            text = self._hud_font.render(f"Hover: {self._calculate_machine_pos(self._hover_point)}", True, (0, 0, 0))
-            self._editor_frame.blit(text, (10, 20))
 
         # draw the bounds
         if self._image and not self._hide_image:
@@ -138,11 +140,26 @@ class Editor(h_Editor):
             pygame.draw.line(self._editor_frame, (0, 0, 0), (self._editor_frame.get_width() / 2 + self._image.get_width() / 2 + 10 + text.get_width() / 2 - 5, self._editor_frame.get_height() / 2 - self._image.get_height() / 2), (self._editor_frame.get_width() / 2 + self._image.get_width() / 2 + 10 + text.get_width() / 2 + 5, self._editor_frame.get_height() / 2 - self._image.get_height() / 2))
             pygame.draw.line(self._editor_frame, (0, 0, 0), (self._editor_frame.get_width() / 2 + self._image.get_width() / 2 + 10 + text.get_width() / 2 - 5, self._editor_frame.get_height() / 2 + self._image.get_height() / 2), (self._editor_frame.get_width() / 2 + self._image.get_width() / 2 + 10 + text.get_width() / 2 + 5, self._editor_frame.get_height() / 2 + self._image.get_height() / 2))
 
+
+        Util.zoom_at_pos(self._editor_frame, self._zoom_focus, self._zoom_level)
+
         self._screen.blit(self._editor_frame, (0, 0))
         self._screen.blit(self._tool_frame, (self._screen.get_width() - 200, 0))
 
+        # Draw HUD =====================================
+        hud = {
+            "Mouse": self._calculate_machine_pos(Point(pygame.mouse.get_pos()[0], pygame.mouse.get_pos()[1])),
+            "Point Density": self._point_density,
+            "FPS": round(self._clock.get_fps()),
+        }
+
+        for i, (k, v) in enumerate(hud.items()):
+            if v:
+                text = self._hud_font.render(f"{k}: {v}", True, (0, 0, 0))
+                self._screen.blit(text, (10, 20 + (i-1) * 20))
+
     def _keybind_open_image(self) -> None:
-        path = filedialog.askopenfilename(initialdir=os.getcwd(), title="Select Image", filetypes=(("jpeg files", "*.jpg"), ("png files", "*.png"), ("all files", "*.*")))
+        path = filedialog.askopenfilename(initialdir=os.getcwd(), title="Select Image", filetypes=(("pictures", "*.png *.jpg *.jpeg *.bmp"), ("all files", "*.*")))
         if path:
             img = cv2.imread(path)
             self._image = pygame.image.load(path)
@@ -194,11 +211,15 @@ class Editor(h_Editor):
         # event code needs to be moved over to ctypes because pygame drains the message queue before we can get to it
 
         while self._running:
+            self._clock.tick(60)
+
             msg = ctypes.wintypes.MSG()
             ret = ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
 
             ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
             ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
+
+            self._draw()
 
             self._menu_bar.handle_message(msg)
             Util.apply([x.event for x in self._tool_components], event=msg)
@@ -210,12 +231,19 @@ class Editor(h_Editor):
                 elif msg.wParam == 8: ... # minimize
 
             elif msg.message == 512: # Mouse Motion
-                pos = pygame.mouse.get_pos()
+                # account for zoom in pos using focus_point and zoom_level
+                old = (pygame.mouse.get_pos()[0] - self._zoom_focus[0]) / self._zoom_level + self._zoom_focus[0], (pygame.mouse.get_pos()[1] - self._zoom_focus[1]) / self._zoom_level + self._zoom_focus[1]
+                self._evaluated_mouse_pos = Util.get_zoomed_mouse_pos(pygame.mouse.get_pos(), self._zoom_level)
+
                 if self._selected_point:
-                    self._selected_point.set_pos(pos[0] + self._grab_offset[0], pos[1] + self._grab_offset[1])
+                    self._selected_point.set_pos(self._evaluated_mouse_pos[0] + self._grab_offset[0], self._evaluated_mouse_pos[1] + self._grab_offset[1])
+                elif self._dragging:
+                    dX, dY = old[0] - self._last_mouse_pos[0], old[1] - self._last_mouse_pos[1]
+                    self._last_mouse_pos = old
+                    self._zoom_focus = (self._zoom_focus[0] - dX, self._zoom_focus[1] - dY)
                 else:
                     for p in self._points:
-                        if abs(p.x - pos[0]) < self._point_size and abs(p.y - pos[1]) < self._point_size:
+                        if abs(p.x - self._evaluated_mouse_pos[0]) < self._point_size and abs(p.y - self._evaluated_mouse_pos[1]) < self._point_size:
                             self._hover_point = p
                             break
                         else:
@@ -223,26 +251,36 @@ class Editor(h_Editor):
             
             elif msg.message == 513: # Mouse Button Down
                 if msg.wParam == 1:
-                    pos = pygame.mouse.get_pos()
                     for p in self._points:
-                        if abs(p.x - pos[0]) < self._point_size and abs(p.y - pos[1]) < self._point_size:
+                        if abs(p.x - self._evaluated_mouse_pos[0]) < self._point_size and abs(p.y - self._evaluated_mouse_pos[1]) < self._point_size:
                             self._selected_point = p
-                            self._grab_offset = (p.x - pos[0], p.y - pos[1])
+                            self._grab_offset = (p.x - self._evaluated_mouse_pos[0], p.y - self._evaluated_mouse_pos[1])
                             self._undo_stack.append({'action': 'move', 'old': (p.x, p.y), 'point': p})
                             break
+                    else:
+                        if not self._dragging:
+                            self._last_mouse_pos = (pygame.mouse.get_pos()[0] - self._zoom_focus[0]) / self._zoom_level + self._zoom_focus[0], (pygame.mouse.get_pos()[1] - self._zoom_focus[1]) / self._zoom_level + self._zoom_focus[1]
+                            self._dragging = True
+
                 elif msg.wParam == 2: # right click
+                    # TODO: Fix this
                     pos = pygame.mouse.get_pos()
                     if not self._selected_point and self._image and not self._hide_image:
                         self._points.append(Point(pos[0], pos[1]))
                         self._undo_stack.append({'action': 'add', 'point': self._points[-1]})
 
-            elif msg.message == 514: # Mouse Button Up
+            elif msg.message == 514: # left click up
                 self._selected_point = None
+                self._dragging = False
+            
+            elif msg.message == 517: # right click up
+                ...
 
             elif msg.message == 256: # Key Down
                 self._pressed_keys[msg.wParam] = True
-                if msg.wParam == 79 and self._pressed_keys.get(17, False):
+                if msg.wParam == 79 and self._pressed_keys.get(17, False): # Ctrl + O
                     self._keybind_open_image()
+
                 elif msg.wParam == 90 and self._pressed_keys.get(17, False) and self._pressed_keys.get(16, False):
                     if len(self._redo_stack) > 0:
                         action = self._redo_stack.pop()
@@ -252,7 +290,7 @@ class Editor(h_Editor):
                         elif action['action'] == 'move':
                             action['point'].set_pos(action['old'][0], action['old'][1])
 
-                elif msg.wParam == 90 and self._pressed_keys.get(17, False):
+                elif msg.wParam == 90 and self._pressed_keys.get(17, False): # Ctrl + Z
                     if len(self._undo_stack) > 0:
                         action = self._undo_stack.pop()
                         self._redo_stack.append(action)
@@ -261,8 +299,18 @@ class Editor(h_Editor):
                         elif action['action'] == 'move':
                             action['point'].set_pos(action['old'][0], action['old'][1])
 
-                elif msg.wParam == 76:
+                elif msg.wParam == 76: # L
                     self._hide_image = not self._hide_image
+                
+                elif msg.wParam == 67: # C
+                    self._zoom_focus = (self._editor_frame.get_width() / 2, self._editor_frame.get_height() / 2)
+                    self._zoom_level = 1
+                
+                elif msg.wParam == 70: # F
+                    if debugpy.is_client_connected():
+                        debugpy.breakpoint()
+                    else:
+                        print("Debugger not connected")
 
             elif msg.message == 257: # Key Up
                 self._pressed_keys[msg.wParam] = False
@@ -272,7 +320,7 @@ class Editor(h_Editor):
             
             elif msg.message == 522: # fine scroll
                 direction = -1 if 420_000_000_0 > msg.wParam else 1 # TODO: this line is bad fix it later
-                self._zoom_level = min(max(self._zoom_level + (direction * 0.2), 1), 10)
+                self._zoom_level = min(max(self._zoom_level + (direction * 0.2), 1), 5)
 
             else:
                 pass
