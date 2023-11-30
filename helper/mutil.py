@@ -1,5 +1,4 @@
-import tempfile, os
-import cv2, threading
+import tempfile, os, time, cv2, threading
 from typing import Any, Callable
 from dataclasses import dataclass
 
@@ -110,8 +109,84 @@ class Util:
                 callback()
         return wrapper
 
+    @staticmethod
+    def set_interval(func: Callable, interval: float) -> None:
+        def wrapper():
+            func()
+            time.sleep(interval)
+            Util.set_interval(func, interval)
+        threading.Thread(target=wrapper, daemon=True).start()
+                
+    @staticmethod
+    def calculate_bounds(points: list[h_Point]) -> 'Rect':
+        min_x = 99999999
+        min_y = 99999999
+        max_x = -99999999
+        max_y = -99999999
+
+        for p in points:
+            if p.x < min_x:
+                min_x = p.x
+            if p.y < min_y:
+                min_y = p.y
+            if p.x > max_x:
+                max_x = p.x
+            if p.y > max_y:
+                max_y = p.y
+
+        return Rect(min_x, min_y, max_x - min_x, max_y - min_y)
+    
+    @staticmethod
+    def convertorigin(point: 'Point', _from: int, _to: int) -> 'Point':
+        if _from == _to:
+            return point
+        if _from == Origin.CENTER:
+            if _to == Origin.TOP_LEFT:
+                return Point(point.x - Util.get_editor()._image.get_width() / 2, point.y - Util.get_editor()._image.get_height() / 2)
+        elif _from == Origin.TOP_LEFT:
+            if _to == Origin.CENTER:
+                return Point(point.x + Util.get_editor()._image.get_width() / 2, point.y + Util.get_editor()._image.get_height() / 2)
+        raise ValueError("Invalid Origin")
+    
+    @staticmethod
+    def copy_points(points: list['Point']) -> list['Point']:
+        new_points: list['Point'] = []
+        for p in points:
+            new_points.append(Point(p.x, p.y))
+        # copy over the next and prev pointers by finding the new points they point to
+        for i in range(len(points)):
+            if points[i]._next is not None:
+                new_points[i]._next = new_points[points.index(points[i]._next)]
+            if points[i]._prev is not None:
+                new_points[i]._prev = new_points[points.index(points[i]._prev)]
+        return new_points
+
 class Origin:
     CENTER = 0
+    TOP_LEFT = 1
+
+@dataclass
+class Rect:
+    x: int
+    y: int
+    w: int
+    h: int
+
+    def contains(self, x: int, y: int) -> bool:
+        return x >= self.x and x <= self.x + self.w and y >= self.y and y <= self.y + self.h
+
+    """
+    Returns a reference to it's self
+    """
+    def scale(self, scale: float) -> 'Rect':
+        self.x *= scale
+        self.y *= scale
+        self.w *= scale
+        self.h *= scale
+        return self
+    
+    def round(self, precision: int) -> 'Rect':
+        return Rect(round(self.x, precision), round(self.y, precision), round(self.w, precision), round(self.h, precision))
 
 @dataclass
 class Point(h_Point):

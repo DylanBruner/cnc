@@ -3,10 +3,10 @@ from typing import Callable
 
 try:
     from component import Component
-    from ..mutil import Util
+    from ..helper.mutil import Util
 except ImportError:
     from ui.component import Component
-    from mutil import Util
+    from helper.mutil import Util
 
 class Button(Component):
     def __init__(self, location: tuple[float, float], size: [float, float] = (100, 40),
