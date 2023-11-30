@@ -55,19 +55,20 @@ class Button(Component):
         text = self._font.render(self._text, True, (0, 0, 0))
         surface.blit(text, (self.location[0] + self.size[0] / 2 - text.get_width() / 2, self.location[1] + self.size[1] / 2 - text.get_height() / 2))
 
-    def event(self, event: pygame.event.Event) -> None:
+    def event(self, event) -> None:
         if self._disabled: return
         pos = self._true_conversion(*pygame.mouse.get_pos())
         if pos[0] < 0 or pos[1] < 0:
             return
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        
+        if event.message == 513 and event.wParam == 1:
             if self.location[0] <= pos[0] <= self.location[0] + self.size[0] and self.location[1] <= pos[1] <= self.location[1] + self.size[1]:
                 self._pressed = True
-        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+        elif event.message == 514: # mouse up
             if self._pressed:
                 self._callback()
             self._pressed = False
-        elif event.type == pygame.MOUSEMOTION:
+        elif event.message == 512:
             if self.location[0] <= pos[0] <= self.location[0] + self.size[0] and self.location[1] <= pos[1] <= self.location[1] + self.size[1]:
                 self._hover = True
             else:

@@ -69,16 +69,6 @@ class MenuBar(h_MenuBar):
             print(f"Menu item clicked: {item_id}")
             # Add functionality here for menu item actions
 
-    def process_windows_messages(self) -> None:
-        msg = ctypes.wintypes.MSG()
-        ret = ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
-
-        ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
-        ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
-
-
-        self.handle_message(msg)
-
 # Usage example:
 def main():
     time.sleep(1)

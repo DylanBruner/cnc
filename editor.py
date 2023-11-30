@@ -1,4 +1,4 @@
-import ctypes
+import ctypes, ctypes.wintypes
 import pygame, os, cv2
 from tkinter import filedialog
 from collections import deque
@@ -62,6 +62,8 @@ class Editor(h_Editor):
         self._tool_frame = pygame.Surface((200, self._screen.get_height()))
         self._hud_font = pygame.font.SysFont("Arial", 20)
         self._bounds: Rect = Rect(0, 0, 0, 0)
+        self._pressed_keys = {}
+        self._zoom_level = 1
 
         self._setup_toolbar()
         self._setup_menubar()
@@ -190,68 +192,91 @@ class Editor(h_Editor):
 
     def run(self) -> None:
         # event code needs to be moved over to ctypes because pygame drains the message queue before we can get to it
+
         while self._running:
-            for event in pygame.event.get():
-                Util.apply([x.event for x in self._tool_components], event=event)
+            msg = ctypes.wintypes.MSG()
+            ret = ctypes.windll.user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
 
-                # Window events ==============================
-                if event.type == pygame.QUIT:
+            ctypes.windll.user32.TranslateMessage(ctypes.byref(msg))
+            ctypes.windll.user32.DispatchMessageW(ctypes.byref(msg))
+
+            self._menu_bar.handle_message(msg)
+            Util.apply([x.event for x in self._tool_components], event=msg)
+
+            # Window events ==============================
+            if msg.message == 161: # Seems to be interaction with the windowbar
+                if msg.wParam == 20: # 'X' button
                     self._running = False
-                elif event.type == pygame.VIDEORESIZE:
-                    self._screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
+                elif msg.wParam == 8: ... # minimize
 
-                # Handle mouse events ========================
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    if event.button == 1: # left click
-                        for p in self._points:
-                            if abs(p.x - event.pos[0]) < self._point_size and abs(p.y - event.pos[1]) < self._point_size:
-                                self._selected_point = p
-                                self._grab_offset = (p.x - event.pos[0], p.y - event.pos[1])
-                                self._undo_stack.append({'action': 'move', 'old': (p.x, p.y), 'point': p})
-                                break
-                    elif event.button == 3 and not self._selected_point and self._image and not self._hide_image:
-                        self._points.append(Point(event.pos[0], event.pos[1]))
+            elif msg.message == 512: # Mouse Motion
+                pos = pygame.mouse.get_pos()
+                if self._selected_point:
+                    self._selected_point.set_pos(pos[0] + self._grab_offset[0], pos[1] + self._grab_offset[1])
+                else:
+                    for p in self._points:
+                        if abs(p.x - pos[0]) < self._point_size and abs(p.y - pos[1]) < self._point_size:
+                            self._hover_point = p
+                            break
+                        else:
+                            self._hover_point = None
+            
+            elif msg.message == 513: # Mouse Button Down
+                if msg.wParam == 1:
+                    pos = pygame.mouse.get_pos()
+                    for p in self._points:
+                        if abs(p.x - pos[0]) < self._point_size and abs(p.y - pos[1]) < self._point_size:
+                            self._selected_point = p
+                            self._grab_offset = (p.x - pos[0], p.y - pos[1])
+                            self._undo_stack.append({'action': 'move', 'old': (p.x, p.y), 'point': p})
+                            break
+                elif msg.wParam == 2: # right click
+                    pos = pygame.mouse.get_pos()
+                    if not self._selected_point and self._image and not self._hide_image:
+                        self._points.append(Point(pos[0], pos[1]))
                         self._undo_stack.append({'action': 'add', 'point': self._points[-1]})
 
-                elif event.type == pygame.MOUSEBUTTONUP:
-                    self._selected_point = None
-                elif event.type == pygame.MOUSEMOTION:
-                    if self._selected_point:
-                        self._selected_point.set_pos(event.pos[0] + self._grab_offset[0], event.pos[1] + self._grab_offset[1])
-                    else:
-                        for p in self._points:
-                            if abs(p.x - event.pos[0]) < self._point_size and abs(p.y - event.pos[1]) < self._point_size:
-                                self._hover_point = p
-                                break
-                            else:
-                                self._hover_point = None
+            elif msg.message == 514: # Mouse Button Up
+                self._selected_point = None
 
-                # Keybinds ===================================
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_o and pygame.key.get_mods() & pygame.KMOD_CTRL:
-                        self._keybind_open_image()
+            elif msg.message == 256: # Key Down
+                self._pressed_keys[msg.wParam] = True
+                if msg.wParam == 79 and self._pressed_keys.get(17, False):
+                    self._keybind_open_image()
+                elif msg.wParam == 90 and self._pressed_keys.get(17, False) and self._pressed_keys.get(16, False):
+                    if len(self._redo_stack) > 0:
+                        action = self._redo_stack.pop()
+                        self._undo_stack.append(action)
+                        if action['action'] == 'add':
+                            self._points.append(action['point'])
+                        elif action['action'] == 'move':
+                            action['point'].set_pos(action['old'][0], action['old'][1])
 
-                    elif event.key == pygame.K_z and pygame.key.get_mods() & pygame.KMOD_CTRL and pygame.key.get_mods() & pygame.KMOD_SHIFT:
-                        if len(self._redo_stack) > 0:
-                            action = self._redo_stack.pop()
-                            self._undo_stack.append(action)
-                            if action['action'] == 'add':
-                                self._points.append(action['point'])
-                            elif action['action'] == 'move':
-                                action['point'].set_pos(action['old'][0], action['old'][1])
-                            
-                    elif event.key == pygame.K_z and pygame.key.get_mods() & pygame.KMOD_CTRL:
-                        if len(self._undo_stack) > 0:
-                            action = self._undo_stack.pop()
-                            self._redo_stack.append(action)
-                            if action['action'] == 'add':
-                                self._points.remove(action['point'])
-                            elif action['action'] == 'move':
-                                action['point'].set_pos(action['old'][0], action['old'][1])
+                elif msg.wParam == 90 and self._pressed_keys.get(17, False):
+                    if len(self._undo_stack) > 0:
+                        action = self._undo_stack.pop()
+                        self._redo_stack.append(action)
+                        if action['action'] == 'add':
+                            self._points.remove(action['point'])
+                        elif action['action'] == 'move':
+                            action['point'].set_pos(action['old'][0], action['old'][1])
 
-                    elif event.key == pygame.K_l:
-                        self._hide_image = not self._hide_image
+                elif msg.wParam == 76:
+                    self._hide_image = not self._hide_image
 
+            elif msg.message == 257: # Key Up
+                self._pressed_keys[msg.wParam] = False
+
+            elif msg.message == 275: # corse scroll
+                direction = ctypes.c_int16(msg.wParam).value
+            
+            elif msg.message == 522: # fine scroll
+                direction = -1 if 420_000_000_0 > msg.wParam else 1 # TODO: this line is bad fix it later
+                self._zoom_level = min(max(self._zoom_level + (direction * 0.2), 1), 10)
+
+            else:
+                pass
+                # print(msg.message, msg.wParam, msg.lParam)
 
             self._draw()
             pygame.display.flip()
