@@ -3,6 +3,7 @@ from tkinter import filedialog
 
 from header.h_editor import h_Editor
 from mutil import Util, Point, Origin
+from gcode.p2code import GCode
 from ui.component import Component
 from ui.button import Button
 
@@ -51,7 +52,7 @@ class Editor(h_Editor):
 
         # Actual Path Code =============================
         self._points: list[Point] = []
-        self._point_density = 5
+        self._point_density = 10
         self._image = None
     
     def _draw(self) -> None:
@@ -96,8 +97,8 @@ class Editor(h_Editor):
             Util.async_task((
                 lambda: setattr(self, "_points", Util.get_path_points(img, self._point_density, (self._editor_frame.get_width() / 2 - self._image.get_width() / 2, self._editor_frame.get_height() / 2 - self._image.get_height() / 2))),
                 lambda: setattr(self, "_points", Util.clean_points(self._points)),
+                lambda: setattr(self, "_points", Util.connect_points(self._points))
             ))
-            print("done")
     
 
     def _calculate_machine_pos(self, p: 'Point') -> tuple[int, int]:
@@ -106,9 +107,11 @@ class Editor(h_Editor):
         
     
     def _setup_toolbar(self) -> None:
-        self._tool_components.append(Button(location=(10, 10), size=(180, 30), text="Open Image", font=self._hud_font,
-                                            callback=lambda: print("hi"),
+        self._tool_components.append(_GCodeButton := Button(location=(10, 10), size=(180, 30), text="Get GCODE", font=self._hud_font,
+                                            callback=lambda: GCode.generate_gcode(self._points, self._image.get_size(), self._origin),
                                             true_conversion=lambda x, y: (x - self._screen.get_width() + 200, y)))
+        _GCodeButton.draw = Util.wrap_function(_GCodeButton.draw, lambda: _GCodeButton.set_disabled(len(self._points) < 2), 'pre')
+
 
     def run(self) -> None:
         while self._running:

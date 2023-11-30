@@ -1,4 +1,5 @@
-import cv2, threading, pygame
+import tempfile, os
+import cv2, threading
 from typing import Any, Callable
 from dataclasses import dataclass
 
@@ -17,7 +18,7 @@ class Util:
 
     @staticmethod
     def get_path_points(img, point_density: int, offset: tuple[int, int] = (0, 0)) -> list[tuple[int, int]]:
-        path: list[Point] = []
+        path: list['Point'] = []
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 100, 200)
@@ -88,7 +89,27 @@ class Util:
     @staticmethod
     def apply(funcs: list[Callable], *args, **kwargs) -> list[Any]:
         return [f(*args, **kwargs) for f in funcs]
+
+    @staticmethod
+    def open_notepad_with(text: str) -> None:
+        tmp = tempfile.NamedTemporaryFile(suffix=".txt", delete=False)
+        tmp.write(text.encode())
+        tmp.flush()
+        tmp.close()
+
+
+        os.system(f"notepad.exe {tmp.name}")
     
+    @staticmethod
+    def wrap_function(func: Callable, callback: Callable, position: str = 'pre', ) -> Callable:
+        def wrapper(*args, **kwargs):
+            if position == 'pre':
+                callback()
+            func(*args, **kwargs)
+            if position == 'post':
+                callback()
+        return wrapper
+
 class Origin:
     CENTER = 0
 

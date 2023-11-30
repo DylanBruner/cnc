@@ -11,7 +11,9 @@ except ImportError:
 class Button(Component):
     def __init__(self, location: tuple[float, float], size: [float, float] = (100, 40),
                  text: str = "", color: tuple[int, int, int] = (70, 130, 180), 
-                 hover_color: tuple[int, int, int] | None = (100, 160, 210), press_color: tuple[int, int, int] | None = (50, 100, 150), 
+                 hover_color: tuple[int, int, int] | None = (100, 160, 210), 
+                 press_color: tuple[int, int, int] | None = (50, 100, 150),
+                 disabled_color: tuple[int, int, int] | None = (150, 150, 150),
                  border_color: tuple[int, int, int] = (0, 0, 0), border_width: int = 1, 
                  border_radius: int = 5, font: pygame.font.Font | None = None,
                  callback: Callable | None = lambda: None, true_conversion: Callable = lambda x, y: (x, y)) -> None:
@@ -21,6 +23,7 @@ class Button(Component):
         self._color = color
         self._hover_color = hover_color if hover_color else color
         self._press_color = press_color if press_color else color
+        self._disabled_color = disabled_color if disabled_color else color
         self._border_color = border_color
         self._border_width = border_width
         self._border_radius = border_radius
@@ -31,10 +34,16 @@ class Button(Component):
         # state
         self._pressed = False
         self._hover = False
+        self._disabled = False
+
+    def set_disabled(self, disabled: bool) -> None:
+        self._disabled = disabled
     
     def draw(self, surface: pygame.Surface) -> None:
         color = self._color
-        if self._pressed:
+        if self._disabled:
+            color = self._disabled_color
+        elif self._pressed:
             color = self._press_color
         elif self._hover:
             color = self._hover_color
@@ -47,6 +56,7 @@ class Button(Component):
         surface.blit(text, (self.location[0] + self.size[0] / 2 - text.get_width() / 2, self.location[1] + self.size[1] / 2 - text.get_height() / 2))
 
     def event(self, event: pygame.event.Event) -> None:
+        if self._disabled: return
         pos = self._true_conversion(*pygame.mouse.get_pos())
         if pos[0] < 0 or pos[1] < 0:
             return
