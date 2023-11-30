@@ -1,9 +1,8 @@
-import pygame, os, cv2, ctypes, ctypes.wintypes, debugpy
+import pygame, os, cv2, ctypes, ctypes.wintypes, debugpy, json
 from tkinter import filedialog
 from collections import deque
 
 from header.h_editor import h_Editor
-from header.h_menubar import WM_COMMAND, WM_QUIT, WM_DESTROY
 from helper.mutil import Util, Point, Origin, Rect
 from gcode.p2code import GCode
 
@@ -71,6 +70,7 @@ class Editor(h_Editor):
         self._last_mouse_pos = (0, 0)
         self._clock = pygame.time.Clock()
         self._evaluated_mouse_pos: tuple[float, float] = None
+        self._image_path: str = None
 
         self._setup_toolbar()
         self._setup_menubar()
@@ -159,10 +159,10 @@ class Editor(h_Editor):
                 self._screen.blit(text, (10, 20 + (i-1) * 20))
 
     def _keybind_open_image(self) -> None:
-        path = filedialog.askopenfilename(initialdir=os.getcwd(), title="Select Image", filetypes=(("pictures", "*.png *.jpg *.jpeg *.bmp"), ("all files", "*.*")))
-        if path:
-            img = cv2.imread(path)
-            self._image = pygame.image.load(path)
+        self._image_path = filedialog.askopenfilename(initialdir=os.getcwd(), title="Select Image", filetypes=(("pictures", "*.png *.jpg *.jpeg *.bmp"), ("all files", "*.*")))
+        if self._image_path:
+            img = cv2.imread(self._image_path)
+            self._image = pygame.image.load(self._image_path)
             Util.async_task((
                 lambda: setattr(self, "_points", Util.get_path_points(img, self._point_density, (self._editor_frame.get_width() / 2 - self._image.get_width() / 2, self._editor_frame.get_height() / 2 - self._image.get_height() / 2))),
                 lambda: setattr(self, "_points", Util.clean_points(self._points)),
@@ -205,6 +205,27 @@ class Editor(h_Editor):
                                             callback=lambda: setattr(self, "_points", Util.connect_points(self._points)),
                                             true_conversion=lambda x, y: (x - self._screen.get_width() + 200, y)))
         _ConnectPointsButton.draw = Util.wrap_function(_ConnectPointsButton.draw, lambda: _ConnectPointsButton.set_disabled(len(self._points) < 2), 'pre')
+    
+    # TODO: test this
+    def _save_project(self, path: str) -> None:
+        with open(path, 'w') as f:
+            f.write(json.dumps({
+                'points': [p.to_dict() for p in self._points],
+                'origin': self._origin,
+                'point_density': self._point_density,
+                'image_path': self._image_path
+            }))
+    
+    # TODO: test this
+    def _load_project(self, path: str) -> None:
+        with open(path, 'r') as f:
+            data = json.loads(f.read())
+            self._points = [Point.from_dict(p) for p in data['points']]
+            Util.reconnect_points(self._points)
+            self._origin = data['origin']
+            self._point_density = data['point_density']
+            self._image_path = data['image_path']
+            self._image = pygame.image.load(self._image_path)
 
 
     def run(self) -> None:

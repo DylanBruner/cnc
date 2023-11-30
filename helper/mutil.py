@@ -9,12 +9,18 @@ from header.h_point import h_Point
 class Util:
     _editor: h_Editor = None
     _editor_center: tuple[int, int] = None
+    _id_counter: int = 0 # used to give anything a unique id
 
     @staticmethod
     def get_editor() -> h_Editor:
         if Util._editor is None:
             raise RuntimeError("Editor not initialized")
         return Util._editor
+
+    @staticmethod
+    def get_unique_id() -> int:
+        Util._id_counter += 1
+        return Util._id_counter
 
     @staticmethod
     def get_path_points(img, point_density: int, offset: tuple[int, int] = (0, 0)) -> list[tuple[int, int]]:
@@ -189,6 +195,25 @@ class Util:
                 new_points[i]._prev = new_points[points.index(points[i]._prev)]
         return new_points
 
+    @staticmethod    
+    def findpoint(points: list['Point'], id: int) -> 'Point':
+        for p in points:
+            if p._id == id:
+                return p
+        return None
+    
+    """
+    Should be used after loading points using from_dict
+    """
+    @staticmethod
+    def reconnect_points(points: list['Point']) -> list['Point']:
+        
+        for p in points:
+            if p._next is not None:
+                p._next = Util.findpoint(p._next)
+            if p._prev is not None:
+                p._prev = Util.findpoint(p._prev)
+
 class Origin:
     CENTER = 0
     TOP_LEFT = 1
@@ -216,13 +241,23 @@ class Rect:
     def round(self, precision: int) -> 'Rect':
         return Rect(round(self.x, precision), round(self.y, precision), round(self.w, precision), round(self.h, precision))
 
-@dataclass
 class Point(h_Point):
-    x: int
-    y: int
-    _next: 'Point' = None
-    _prev: 'Point' = None
+    def __init__(self, x: float | int, y: float | int, fully_initialized: bool = True) -> None:
+        self._id: int = Util.get_unique_id()
+        self.x = x
+        self.y = y
+        self._next = None
+        self._prev = None
+        self._initialized = fully_initialized
 
+    @staticmethod
+    def from_dict(d: dict) -> 'Point':
+        p = Point(d["x"], d["y"], False)
+        p._id = d["id"]
+        p._next = d["next"]
+        p._prev = d["prev"]
+        return p
+    
     def set_pos(self, x: int, y: int) -> None:
         self.x = x
         self.y = y
@@ -240,3 +275,15 @@ class Point(h_Point):
         if isinstance(o, Point):
             return self.x == o.x and self.y == o.y
         return False
+    
+    def to_dict(self) -> dict:
+        return {
+            "x": self.x,
+            "y": self.y,
+            "id": self._id,
+            "next": self._next._id if self._next is not None else None,
+            "prev": self._prev._id if self._prev is not None else None
+        }
+
+    def __str__(self) -> str:
+        return f"Point({self.x}, {self.y})"
