@@ -18,8 +18,6 @@ TODO
     - When you click a point it should show it's properties in the toolbar
       from there you should be able to click 'set next point' and then click
       the point you want to set it to
- - make the menubar actually do things
- - saving and loading a project (contains image, points, origin, point density)
  - more controls in the toolbar
 """
 
@@ -71,6 +69,8 @@ class Editor(h_Editor):
         self._clock = pygame.time.Clock()
         self._evaluated_mouse_pos: tuple[float, float] = None
         self._image_path: str = None
+        self._open_project: str = None
+        self._saved: bool = True
 
         self._setup_toolbar()
         self._setup_menubar()
@@ -104,7 +104,7 @@ class Editor(h_Editor):
             pygame.draw.rect(self._editor_frame, (255, 0, 0), (self._editor_frame.get_width() / 2 - self._image.get_width() / 2, self._editor_frame.get_height() / 2 - self._image.get_height() / 2, self._image.get_width(), self._image.get_height()), 2)
 
         for p in self._points:
-            sizeMod = 1 if p != self._hover_point else 2
+            sizeMod = 1 if p != self._hover_point else 1.2 if p == self._selected_point else 1.2
             pygame.draw.circle(self._editor_frame, (0, 0, 0), (p.x, p.y), self._point_size * sizeMod)
 
         # draw connecting lines
@@ -158,8 +158,16 @@ class Editor(h_Editor):
                 text = self._hud_font.render(f"{k}: {v}", True, (0, 0, 0))
                 self._screen.blit(text, (10, 20 + (i-1) * 20))
 
-    def _keybind_open_image(self) -> None:
-        self._image_path = filedialog.askopenfilename(initialdir=os.getcwd(), title="Select Image", filetypes=(("pictures", "*.png *.jpg *.jpeg *.bmp"), ("all files", "*.*")))
+    def _keybind_open(self) -> None:
+        path = filedialog.askopenfilename(initialdir=os.getcwd(), title="Select Image", filetypes=(("project/picture", "*.cncproj *.png *.jpg *.jpeg *.bmp"), ("all files", "*.*")))
+        if not path.endswith(".cncproj"):
+            self._image_path = path
+            self._load_image()
+        
+        else:
+            self._load_project(path)
+
+    def _load_image(self) -> None:
         if self._image_path:
             img = cv2.imread(self._image_path)
             self._image = pygame.image.load(self._image_path)
@@ -180,14 +188,15 @@ class Editor(h_Editor):
         hwnd = pygame.display.get_wm_info()['window']
         menu_definition = [
         {'text': 'File', 'id': 101, 'sub_menu': [
-            {'text': 'Open', 'id': 201},
-            {'text': 'Save', 'id': 202},
+            {'text': 'Open', 'id': 201, 'callback': self._keybind_open},
+            {'text': 'Save Project', 'id': 202, 'callback': lambda: self._keybind_save(False)},
+            {'text': 'Save Project As', 'id': 203, 'callback': lambda: self._keybind_save(True)},
             {'separator': True},
-            {'text': 'Exit', 'id': 203}
+            {'text': 'Exit', 'id': 204, 'callback': lambda: setattr(self, "_running", False)}
         ]},
         {'text': 'Edit', 'id': 102, 'sub_menu': [
-            {'text': 'Copy', 'id': 301},
-            {'text': 'Paste', 'id': 302}
+            {'text': 'Undo', 'id': 301, 'callback': self._undo},
+            {'text': 'Redo', 'id': 302, 'callback': self._redo}
         ]}
         # Add more menu items/submenus as needed
     ]
@@ -226,7 +235,38 @@ class Editor(h_Editor):
             self._point_density = data['point_density']
             self._image_path = data['image_path']
             self._image = pygame.image.load(self._image_path)
+            self._open_project = path
 
+    def _keybind_save(self, save_as: bool) -> None:
+        if save_as or not self._open_project:
+            path = filedialog.asksaveasfilename(initialdir=os.getcwd(), title="Save Project", filetypes=(("project", "*.cncproj"), ("all files", "*.*")))
+            if path:
+                self._save_project(path)
+                self._open_project = path
+        else:
+            print("saving to", self._open_project)
+            self._save_project(self._open_project)
+        self._saved = True
+
+    def _undo(self) -> None:
+        if len(self._undo_stack) > 0:
+            action = self._undo_stack.pop()
+            self._redo_stack.append(action)
+            if action['action'] == 'add':
+                self._points.remove(action['point'])
+            elif action['action'] == 'move':
+                action['point'].set_pos(action['old'][0], action['old'][1])
+            elif action['action'] == 'remove':
+                self._points.append(action['point'])
+
+    def _redo(self) -> None:
+        if len(self._redo_stack) > 0:
+            action = self._redo_stack.pop()
+            self._undo_stack.append(action)
+            if action['action'] == 'add':
+                self._points.append(action['point'])
+            elif action['action'] == 'move':
+                action['point'].set_pos(action['old'][0], action['old'][1])
 
     def run(self) -> None:
         # event code needs to be moved over to ctypes because pygame drains the message queue before we can get to it
@@ -258,6 +298,7 @@ class Editor(h_Editor):
 
                 if self._selected_point:
                     self._selected_point.set_pos(self._evaluated_mouse_pos[0] + self._grab_offset[0], self._evaluated_mouse_pos[1] + self._grab_offset[1])
+                    self._saved = False
                 elif self._dragging:
                     dX, dY = old[0] - self._last_mouse_pos[0], old[1] - self._last_mouse_pos[1]
                     self._last_mouse_pos = old
@@ -277,6 +318,7 @@ class Editor(h_Editor):
                             self._selected_point = p
                             self._grab_offset = (p.x - self._evaluated_mouse_pos[0], p.y - self._evaluated_mouse_pos[1])
                             self._undo_stack.append({'action': 'move', 'old': (p.x, p.y), 'point': p})
+                            self._saved = False
                             break
                     else:
                         if not self._dragging:
@@ -284,15 +326,17 @@ class Editor(h_Editor):
                             self._dragging = True
 
                 elif msg.wParam == 2: # right click
-                    # TODO: Fix this
-                    pos = pygame.mouse.get_pos()
-                    if not self._selected_point and self._image and not self._hide_image:
-                        self._points.append(Point(pos[0], pos[1]))
-                        self._undo_stack.append({'action': 'add', 'point': self._points[-1]})
+                    ...
 
             elif msg.message == 514: # left click up
                 self._selected_point = None
                 self._dragging = False
+            
+            elif msg.message == 516: # right click down
+                if not self._selected_point and self._image and not self._hide_image:
+                    self._points.append(Point(self._evaluated_mouse_pos[0], self._evaluated_mouse_pos[1]))
+                    self._undo_stack.append({'action': 'add', 'point': self._points[-1]})
+                    self._saved = False
             
             elif msg.message == 517: # right click up
                 ...
@@ -300,25 +344,20 @@ class Editor(h_Editor):
             elif msg.message == 256: # Key Down
                 self._pressed_keys[msg.wParam] = True
                 if msg.wParam == 79 and self._pressed_keys.get(17, False): # Ctrl + O
-                    self._keybind_open_image()
+                    self._keybind_open()
 
-                elif msg.wParam == 90 and self._pressed_keys.get(17, False) and self._pressed_keys.get(16, False):
-                    if len(self._redo_stack) > 0:
-                        action = self._redo_stack.pop()
-                        self._undo_stack.append(action)
-                        if action['action'] == 'add':
-                            self._points.append(action['point'])
-                        elif action['action'] == 'move':
-                            action['point'].set_pos(action['old'][0], action['old'][1])
+                elif msg.wParam == 90 and self._pressed_keys.get(17, False) and self._pressed_keys.get(16, False): # Ctrl + Shift + Z
+                    self._redo()
 
                 elif msg.wParam == 90 and self._pressed_keys.get(17, False): # Ctrl + Z
-                    if len(self._undo_stack) > 0:
-                        action = self._undo_stack.pop()
-                        self._redo_stack.append(action)
-                        if action['action'] == 'add':
-                            self._points.remove(action['point'])
-                        elif action['action'] == 'move':
-                            action['point'].set_pos(action['old'][0], action['old'][1])
+                    self._undo()
+
+                elif msg.wParam == 83 and self._pressed_keys.get(17, False): # Ctrl + S
+                    self._keybind_save(False)
+                
+                elif msg.wParam == 83 and self._pressed_keys.get(17, False) and self._pressed_keys.get(16, False): # Ctrl + Shift + S
+                    self._keybind_save(True)
+
 
                 elif msg.wParam == 76: # L
                     self._hide_image = not self._hide_image
@@ -333,6 +372,13 @@ class Editor(h_Editor):
                     else:
                         print("Debugger not connected")
 
+                elif msg.wParam == 46: # Delete
+                    if self._selected_point:
+                        self._undo_stack.append({'action': 'remove', 'point': self._selected_point})
+                        self._points.remove(self._selected_point)
+                        self._selected_point = None
+                        self._saved = False
+
             elif msg.message == 257: # Key Up
                 self._pressed_keys[msg.wParam] = False
 
@@ -346,6 +392,11 @@ class Editor(h_Editor):
             else:
                 pass
                 # print(msg.message, msg.wParam, msg.lParam)
+
+            if not self._saved:
+                pygame.display.set_caption(f"Path Editor - {self._open_project if self._open_project else 'Untitled'}*")
+            else:
+                pygame.display.set_caption(f"Path Editor - {self._open_project if self._open_project else 'Untitled'}")
 
             self._draw()
             pygame.display.flip()

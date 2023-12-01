@@ -31,8 +31,10 @@ class MenuBar(h_MenuBar):
         self.hwnd = window_handle
         self.menu = None
         self.menu_items = {}
+        self.menu_definition = None
 
     def create_menu(self, menu_definition):
+        self.menu_definition = menu_definition
         self.menu = ctypes.windll.user32.CreateMenu()
 
         for item in menu_definition:
@@ -63,12 +65,24 @@ class MenuBar(h_MenuBar):
                 ctypes.windll.user32.AppendMenuW(submenu, MF_STRING, sub_item_id, sub_item_text)
                 self.menu_items[sub_item_id] = None
 
+    def _find_menu_item_by_id(self, menu_definition, item_id):
+        for item in menu_definition:
+            if item.get('id', 0) == item_id:
+                return item
+            elif item.get('sub_menu', None):
+                found = self._find_menu_item_by_id(item['sub_menu'], item_id)
+                if found:
+                    return found
+        return None
+
     def handle_message(self, msg):
         if msg.message == WM_COMMAND:
             item_id = msg.wParam
-            print(f"Menu item clicked: {item_id}")
-            # Add functionality here for menu item actions
-
+            # find the menu item function by its id in the menu definition
+            menu_item = self._find_menu_item_by_id(self.menu_definition, item_id)
+            if menu_item:
+                menu_item.get('callback', lambda: None)()
+            
 # Usage example:
 def main():
     time.sleep(1)

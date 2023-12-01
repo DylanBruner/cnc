@@ -210,9 +210,9 @@ class Util:
         
         for p in points:
             if p._next is not None:
-                p._next = Util.findpoint(p._next)
+                p._next = Util.findpoint(points, p._next)
             if p._prev is not None:
-                p._prev = Util.findpoint(p._prev)
+                p._prev = Util.findpoint(points, p._prev)
 
 class Origin:
     CENTER = 0
