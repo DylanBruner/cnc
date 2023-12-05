@@ -7,7 +7,42 @@ except ImportError:
 
 class GCode:
     @staticmethod
-    def generate_gcode(points: list[h_Point], size: tuple[float, float], origin: int) -> None:
+    def validate_path(points: list[h_Point]) -> list[h_Point]:
+        points = Util.copy_points(points)
+        points_sorted = []
+        errors = []
+
+        current = points.pop(0)
+
+        while len(points) > 0:
+            if current._next is None:
+                errors.append(current)
+                current = points.pop(0)
+                continue
+            
+            if current._next not in points:
+                errors.append(current)
+                current = points.pop(0)
+                continue
+
+            i = points.index(current._next)
+            if i > len(points) - 1:
+                break
+            current = points.pop(i)
+            points_sorted.append(current)
+
+        return errors
+
+    @staticmethod
+    def generate_gcode(points: list[h_Point], size: tuple[float, float], origin: int, feedrate: float = 10.0) -> None:
+        points = Util.copy_points(points)
+
+        points = sorted(points, key=lambda p: p._id)
+
+
+        # points = Util.Transform.shift(points, (-230, -250))
+        points = Util.Transform.hflip(points)
+
         if origin not in [Origin.CENTER]:
             raise ValueError("Invalid Origin")
         
@@ -30,6 +65,9 @@ class GCode:
             y = str(round(translated[index][1], 3))
             if y[-2:] == ".0":
                 y = y[:-2] + "." + y[-1]
-            code += f"G1 X{x} Y{y}\n"
+            feedrate = str(feedrate)
+            if feedrate[-2:] == ".0":
+                feedrate = feedrate[:-2] + "." + feedrate[-1]
+            code += f"G1 X{x} Y{y} F{feedrate}\n"
         
         Util._async(lambda: Util.open_notepad_with(code))

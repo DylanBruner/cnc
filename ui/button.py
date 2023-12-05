@@ -39,6 +39,9 @@ class Button(Component):
     def set_disabled(self, disabled: bool) -> None:
         self._disabled = disabled
     
+    def set_text(self, text: str) -> None:
+        self._text = text
+    
     def draw(self, surface: pygame.Surface) -> None:
         color = self._color
         if self._disabled:

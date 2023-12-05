@@ -29,8 +29,7 @@ class Util:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 100, 200)
 
-        # Find contours
-        contours, hierarchy = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        contours, hierarchy = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS)
 
         # add all points to the path making sure their all connected
         for c in contours:
@@ -46,31 +45,28 @@ class Util:
                     path.remove(p2)
 
         return path
-
+    
     @staticmethod
     def connect_points(points: list['Point']) -> list['Point']:
-        # start at the first point,
-        # the next point will be the closest non-connected point prioritizing the points furthest away from the middle
-        # repeat until all points are connected
+        points = sorted(points, key=lambda p: p._id)
+        connected = 0
+        for p in [p for p in points if p._id != -1]:
+            if p._id == -1: continue
 
-        connected_points: list[Point] = []
-        connected_points.append(points[0])
-        points.remove(points[0])
-        while len(points) > 0:
-            closest_point = None
-            closest_distance = 9999
-            for p in points:
-                if p.distance(connected_points[-1]) < closest_distance:
-                    closest_point = p
-                    closest_distance = p.distance(connected_points[-1])
-            
-                
-            connected_points[-1]._next = closest_point
-            closest_point._prev = connected_points[-1]
-            connected_points.append(closest_point)
-            points.remove(closest_point)
-        return connected_points
-    
+            connected += 1
+            i = points.index(p)
+            if i == 0:
+                p._prev = None
+            else:
+                p._prev = points[i - 1]
+            if i == len(points) - 1:
+                p._next = None
+            else:
+                if points[i + 1]._id != -1:                
+                    p._next = points[i + 1]
+        print(f"[INFO] Connected {connected} points")
+        return points
+
     @staticmethod
     def clean_points(points: list['Point']) -> list['Point']:
         # remove points that are too close to each other
@@ -102,7 +98,6 @@ class Util:
         tmp.write(text.encode())
         tmp.flush()
         tmp.close()
-
 
         os.system(f"notepad.exe {tmp.name}")
     
@@ -187,12 +182,15 @@ class Util:
         new_points: list['Point'] = []
         for p in points:
             new_points.append(Point(p.x, p.y))
+
         # copy over the next and prev pointers by finding the new points they point to
         for i in range(len(points)):
             if points[i]._next is not None:
                 new_points[i]._next = new_points[points.index(points[i]._next)]
             if points[i]._prev is not None:
                 new_points[i]._prev = new_points[points.index(points[i]._prev)]
+            new_points[i]._id = points[i]._id
+            new_points[i]._locked = points[i]._locked
         return new_points
 
     @staticmethod    
@@ -214,6 +212,48 @@ class Util:
             if p._prev is not None:
                 p._prev = Util.findpoint(points, p._prev)
 
+    @staticmethod
+    def clear_point_metadata(points: list['Point']) -> list['Point']:
+        for p in points:
+            p._id = -1
+            p._next = None
+            p._prev = None
+            p._locked = False
+        return points
+
+    class Transform:
+        @staticmethod
+        def vshift(points: list['Point'], amount: int) -> list['Point']:
+            return Util.Transform.shift(points, (0, amount))    
+    
+        @staticmethod
+        def hshift(points: list['Point'], amount: int) -> list['Point']:
+            return Util.Transform.shift(points, (amount, 0))
+        
+        @staticmethod
+        def shift(points: list['Point'], amount: tuple[int, int]) -> list['Point']:
+            for p in points:
+                p.x += amount[0]
+                p.y += amount[1]
+            return points
+        
+        @staticmethod
+        def hflip(points: list['Point']) -> list['Point']:
+            return Util.Transform.flip(points, True, False)
+
+        @staticmethod
+        def vflip(points: list['Point']) -> list['Point']:
+            return Util.Transform.flip(points, False, True)
+
+        @staticmethod
+        def flip(points: list['Point'], horizontal: bool, vertical: bool) -> list['Point']:
+            for p in points:
+                if horizontal:
+                    p.x = -p.x
+                if vertical:
+                    p.y = -p.y
+            return points
+        
 class Origin:
     CENTER = 0
     TOP_LEFT = 1
@@ -248,14 +288,21 @@ class Point(h_Point):
         self.y = y
         self._next = None
         self._prev = None
+        self._locked = False
         self._initialized = fully_initialized
 
     @staticmethod
-    def from_dict(d: dict) -> 'Point':
+    def from_dict(d: dict, upgrade_if_needed: bool = True) -> 'Point':
+        if upgrade_if_needed:
+            d = Point._upgrade_data(d)
+
         p = Point(d["x"], d["y"], False)
         p._id = d["id"]
+        p._locked = d["locked"]
         p._next = d["next"]
         p._prev = d["prev"]
+
+
         return p
     
     def set_pos(self, x: int, y: int) -> None:
@@ -264,6 +311,12 @@ class Point(h_Point):
     
     def distance(self, p: 'Point') -> float:
         return ((p.x - self.x) ** 2 + (p.y - self.y) ** 2) ** 0.5
+    
+    def islocked(self) -> bool:
+        return self._locked
+    
+    def setlocked(self, locked: bool) -> None:
+        self._locked = locked
     
     def next(self) -> 'Point':
         return self._next
@@ -278,12 +331,22 @@ class Point(h_Point):
     
     def to_dict(self) -> dict:
         return {
+            "id": self._id,
             "x": self.x,
             "y": self.y,
-            "id": self._id,
+            "locked": self._locked,
             "next": self._next._id if self._next is not None else None,
             "prev": self._prev._id if self._prev is not None else None
         }
+    
+    @staticmethod
+    def _upgrade_data(data: dict) -> dict:
+        _template = {"id": 0, "x": 0, "y": 0, "locked": False, "next": None, "prev": None}
+        for k in _template:
+            if k not in data:
+                data[k] = _template[k]
+                print(f"[INFO] Warning Point at {data.get('x', 'X-NotFound')}, {data.get('y', 'Y-NotFound')} is missing key [{k}, adding it to the memory copy")
+        return data
 
     def __str__(self) -> str:
         return f"Point({self.x}, {self.y})"

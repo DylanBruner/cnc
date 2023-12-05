@@ -4,6 +4,7 @@ except ImportError:
     from header.h_class import HeaderClass
 
 class h_Point(HeaderClass):
+    _id: int
     x: int
     y: int
     _next: 'h_Point' = None
